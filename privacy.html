@@ -7,41 +7,82 @@
 <title>개인정보 처리 방침 — 보안 가드</title>
 <meta name="description" content="보안 가드는 서버 없이 브라우저에서만 동작하는 정적 앱으로, 수집하는 개인정보가 없습니다." />
 <style>
-  :root { color-scheme: light dark; }
-  body { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; font: 15px/1.75 -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; color: #171a1f; background: #fbfcfd; }
-  @media (prefers-color-scheme: dark) { body { color: #e9edf1; background: #0c0f13; } a { color: #7cc4ff; } }
-  h1 { font-size: 24px; letter-spacing: -.02em; }
-  h2 { font-size: 16px; margin-top: 28px; }
-  .muted { opacity: .7; font-size: 13px; }
-  a { color: #0f6fd1; }
-  ul { padding-left: 20px; }
+  /* A안 — Crisp Bento · 문서형 변형 (외부 리소스 없음) */
+  @font-face { font-family: 'PlexKR'; src: url('assets/fonts/plexkr-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'PlexKR'; src: url('assets/fonts/plexkr-SemiBold.woff2') format('woff2'); font-weight: 500 600; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'PlexKR'; src: url('assets/fonts/plexkr-Bold.woff2') format('woff2'); font-weight: 700 900; font-style: normal; font-display: swap; }
+  :root {
+    color-scheme: light dark;
+    --bg: #FAFAFA; --surface: #FFFFFF; --ink: #0C0D0F; --ink-2: #3C4045;
+    --sub: #6B7076; --line: #E7E8EA; --accent: #2F5BFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0B0C0E; --surface: #121417; --ink: #F4F5F8; --ink-2: #D3D7DD; --sub: #A8AEB7; --line: #262A31; --accent: #7C97FF; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.75 'PlexKR', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    letter-spacing: -.01em; -webkit-font-smoothing: antialiased;
+  }
+  .top { max-width: 780px; margin: 0 auto; padding: 24px 20px 0; display: flex; align-items: center; gap: 10px; }
+  .mark {
+    width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-size: 14px; font-weight: 900; flex: none;
+  }
+  .top strong { font-size: 15px; font-weight: 800; letter-spacing: -.03em; }
+  .top a { margin-left: auto; font-size: 12.5px; font-weight: 700; color: var(--accent); text-decoration: none; }
+  .top a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  main {
+    max-width: 780px; margin: 16px auto 64px; padding: 32px 32px 36px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  }
+  h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.045em; font-weight: 800; }
+  .muted { margin: 8px 0 0; color: var(--sub); font-size: 12.5px; }
+  h2 { margin: 30px 0 6px; font-size: 15.5px; font-weight: 800; letter-spacing: -.03em; }
+  p { margin: 0; color: var(--ink-2); }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-top: 30px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; font-weight: 700; color: var(--ink); text-decoration: none; }
+  .back:hover { border-color: var(--accent); color: var(--accent); }
+  @media (max-width: 620px) {
+    main { margin: 12px 12px 40px; padding: 22px 18px 26px; }
+    h1 { font-size: 24px; }
+  }
 </style>
 </head>
 <body>
-<h1>개인정보 처리 방침</h1>
-<p class="muted">보안 가드 · 최종 갱신 2026-11-21</p>
+<div class="top">
+  <span class="mark" aria-hidden="true">✓</span>
+  <strong>보안 가드</strong>
+  <a href="./">앱으로 돌아가기 →</a>
+</div>
 
-<h2>1. 수집하는 개인정보</h2>
-<p>없습니다. 검사하려고 붙여넣은 글·파일·비밀번호는 메모리에서만 처리되고 저장되지 않습니다.</p>
+<main>
+  <h1>개인정보 처리 방침</h1>
+  <p class="muted">보안 가드 · 최종 갱신 2026-11-21</p>
 
-<h2>2. 저장 위치와 항목</h2>
-<p>테마 설정만 브라우저 localStorage에 남습니다. 검사 기록·입력 내용은 저장하지 않으며, 화면을 닫으면 사라집니다.</p>
+  <h2>1. 수집하는 개인정보</h2>
+  <p>없습니다. 검사하려고 붙여넣은 글·파일·비밀번호는 메모리에서만 처리되고 저장되지 않습니다.</p>
 
-<h2>3. 외부 전송</h2>
-<p>외부 전송이 0건입니다. 링크·문구 점검은 브라우저 안의 규칙으로만 판정하며, 어떤 주소로도 접속하지 않습니다.</p>
+  <h2>2. 저장 위치와 항목</h2>
+  <p>테마 설정만 브라우저 localStorage에 남습니다. 검사 기록·입력 내용은 저장하지 않으며, 화면을 닫으면 사라집니다.</p>
 
-<h2>4. 쿠키·추적</h2>
-<p>쿠키를 쓰지 않습니다. 분석 도구·광고 픽셀·외부 트래커를 넣지 않으며, 이용 기록을 수집하지 않습니다.</p>
+  <h2>3. 외부 전송</h2>
+  <p>외부 전송이 0건입니다. 링크·문구 점검은 브라우저 안의 규칙으로만 판정하며, 어떤 주소로도 접속하지 않습니다.</p>
 
-<h2>5. 보관과 삭제</h2>
-<p>브라우저 사이트 데이터를 지우면 테마 설정까지 삭제됩니다. 저장하는 검사 기록이 없어 따로 지울 항목은 없습니다.</p>
+  <h2>4. 쿠키·추적</h2>
+  <p>쿠키를 쓰지 않습니다. 분석 도구·광고 픽셀·외부 트래커를 넣지 않으며, 이용 기록을 수집하지 않습니다.</p>
 
-<h2>6. 제3자 제공</h2>
-<p>제3자에게 제공하는 데이터가 없습니다. 운영자는 이용자의 데이터를 받지 않으므로 별도 제공·위탁이 없습니다.</p>
+  <h2>5. 보관과 삭제</h2>
+  <p>브라우저 사이트 데이터를 지우면 테마 설정까지 삭제됩니다. 저장하는 검사 기록이 없어 따로 지울 항목은 없습니다.</p>
 
-<h2>7. 문의</h2>
-<p>이 앱은 정적 파일로 배포되며 운영자에게 개인정보가 전달되지 않습니다. 문의·오류 제보는 배포 페이지에 안내된 연락처나 배포 저장소의 이슈로 남겨 주세요.</p>
+  <h2>6. 제3자 제공</h2>
+  <p>제3자에게 제공하는 데이터가 없습니다. 운영자는 이용자의 데이터를 받지 않으므로 별도 제공·위탁이 없습니다.</p>
 
-<p><a href="./">← 앱으로 돌아가기</a></p>
+  <h2>7. 문의</h2>
+  <p>이 앱은 정적 파일로 배포되며 운영자에게 개인정보가 전달되지 않습니다. 문의·오류 제보는 배포 페이지에 안내된 연락처나 배포 저장소의 이슈로 남겨 주세요.</p>
+
+  <a class="back" href="./">← 앱으로 돌아가기</a>
+</main>
 </body>
 </html>

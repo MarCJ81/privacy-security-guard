@@ -279,8 +279,10 @@
   }
 
   function statEl(value, label, cls) {
-    var s = el('div', 'stat' + (cls ? ' ' + cls : ''));
-    s.appendChild(el('b', null, value));
+    var text = String(value);
+    var isText = /[가-힣]/.test(text);
+    var s = el('div', 'stat' + (cls ? ' ' + cls : '') + (isText ? ' stat-text' : ''));
+    s.appendChild(el('b', null, text));
     s.appendChild(el('span', null, label));
     return s;
   }
