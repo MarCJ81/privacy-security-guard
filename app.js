@@ -73,7 +73,7 @@
       btn.setAttribute('title', dark ? '라이트 모드' : '다크 모드');
     }
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', dark ? '#080b12' : '#ffffff');
+    if (meta) meta.setAttribute('content', dark ? '#0B0C0E' : '#ffffff');
   }
   function toggleTheme() {
     var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
