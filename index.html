@@ -179,6 +179,7 @@
           <p id="urlAdvice" class="muted"></p>
         </div>
         <div class="score-meta" id="urlMeta"></div>
+        <div class="meta-note" id="urlMetaNote" hidden></div>
       </div>
 
       <div class="url-cols">
@@ -224,13 +225,14 @@
         <path d="M12 28v6a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
       </svg>
       <b>파일을 끌어다 놓거나 <span class="u">클릭</span>하세요</b>
-      <span class="muted">이미지 · 문서 · 설치 파일 · 여러 개 한 번에</span>
+      <span class="muted">이미지 · 문서 · 설치 파일 · 여러 개 한 번에 (HEIC·AVIF 포함)</span>
       <span class="drop-note">파일은 어디로도 전송되지 않습니다</span>
     </div>
     <input type="file" id="fileInput" multiple hidden />
 
     <div class="file-tools">
       <button type="button" class="btn btn-ghost" data-action="load-sample-photo">GPS 들어간 샘플 사진으로 체험</button>
+      <button type="button" class="btn btn-ghost" data-action="load-sample-heic">아이폰 HEIC 샘플로 체험</button>
       <div class="hash-compare">
         <label for="hashInput">대조할 해시</label>
         <input id="hashInput" class="input" type="text" spellcheck="false" autocomplete="off"
@@ -283,7 +285,17 @@
         </div>
         <div id="pwWarnings" class="warnings"></div>
         <div id="pwClasses" class="class-chips"></div>
-        <p class="note">흔한 단어·반복·연속 배열을 감점한 뒤의 실효 엔트로피로 계산합니다. 사이트마다 해시 방식이 달라 실제 시간은 달라질 수 있습니다.</p>
+        <div class="pwzx" id="pwZx" hidden>
+          <div class="pwzx-head">
+            <span>사전·패턴 기반 진단</span>
+            <b id="pwZxScore">—</b>
+          </div>
+          <div class="pwzx-guesses" id="pwZxGuesses"></div>
+          <ul class="pwzx-tips" id="pwZxTips"></ul>
+          <div class="pwzx-source" id="pwZxSource"></div>
+        </div>
+        <p class="pwzx-load" id="pwZxLoad" hidden>사전 공격 엔진을 불러오는 중…</p>
+        <p class="note">흔한 단어·반복·연속 배열을 감점한 뒤의 실효 엔트로피로 계산합니다. 사전 엔진이 준비되면 실제 추측 횟수(사전·키보드 패턴 인식)로 등급을 다시 매깁니다. 사이트마다 해시 방식이 달라 실제 시간은 달라질 수 있습니다.</p>
       </div>
 
       <div class="panel">
@@ -341,6 +353,8 @@
 <div class="modal-root" id="modalRoot" hidden></div>
 <div class="toast-root" id="toastRoot" aria-live="polite"></div>
 
+<script src="assets/vendor/tldts.umd.min.js"></script>
+<script src="assets/vendor/exifr.umd.js"></script>
 <script src="core.js"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>

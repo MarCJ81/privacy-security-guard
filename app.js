@@ -96,7 +96,31 @@
         tab.setAttribute('aria-selected', on ? 'true' : 'false');
       }
     });
+    if (name === 'pw') loadPasswordEngine();
     window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  /* ── 사전 공격 엔진(zxcvbn) 지연 로딩 ──────────────── */
+  var pwEnginePromise = null;
+  function loadPasswordEngine() {
+    if (C.engineState().password) { renderPassword(); return Promise.resolve(true); }
+    var note = $('#pwZxLoad');
+    if (!pwEnginePromise) {
+      if (note) note.hidden = false;
+      pwEnginePromise = new Promise(function (resolve) {
+        var tag = document.createElement('script');
+        tag.src = 'assets/vendor/zxcvbn.js';
+        tag.async = true;
+        tag.onload = function () { resolve(!!C.engineState().password); };
+        tag.onerror = function () { resolve(false); };
+        document.head.appendChild(tag);
+      });
+    }
+    return pwEnginePromise.then(function (ok) {
+      if (note) note.hidden = true;
+      if (ok) renderPassword();
+      return ok;
+    });
   }
 
   /* ── 작동 원리 모달 ─────────────────────────────── */
@@ -392,8 +416,21 @@
     meta.textContent = '';
     addMeta(meta, '표시 주소', res.readableHost + (res.port ? ':' + res.port : ''));
     addMeta(meta, '등록 도메인', res.registrable);
+    if (res.publicSuffix) addMeta(meta, '공인 접미사', res.publicSuffix + (res.privateSuffix ? ' (민간)' : ''));
     addMeta(meta, '경로', (res.path || '/') + (res.query || ''));
     addMeta(meta, '프로토콜', res.protocol + (res.brand ? ' · ' + res.brand + ' 공식' : ''));
+
+    var metaNote = $('#urlMetaNote');
+    if (metaNote) {
+      if (res.privateSuffix) {
+        metaNote.hidden = false;
+        metaNote.textContent = '이 주소는 ' + res.publicSuffix + ' 아래 누구나 등록할 수 있는 공간에 만들어졌습니다. ' +
+          '등록 도메인은 ' + res.registrable + ' 이고, 실제 운영 주체는 이 주소만으로 알 수 없습니다.';
+      } else {
+        metaNote.hidden = true;
+        metaNote.textContent = '';
+      }
+    }
 
     var list = $('#urlReasons');
     list.textContent = '';
@@ -681,6 +718,34 @@
       box.appendChild(gps);
     }
 
+    var meta = exif.meta;
+    if (meta && (meta.device || meta.capturedAt || meta.lens || meta.serial || meta.gps)) {
+      var pm = el('div', 'photo-meta');
+      var pmHead = el('div', 'photo-meta-head');
+      pmHead.appendChild(el('span', null, '정밀 촬영 정보'));
+      pmHead.appendChild(el('span', 'pm-engine', meta.engine === 'exifr' ? 'exifr · 표준 태그' : '내장 파서'));
+      pm.appendChild(pmHead);
+      function pmRow(label, value) {
+        if (!value) return;
+        var row = el('div', 'pm-row');
+        row.appendChild(el('span', null, label));
+        row.appendChild(el('b', null, value));
+        pm.appendChild(row);
+      }
+      pmRow('촬영 기기', meta.device);
+      pmRow('렌즈', meta.lens);
+      pmRow('촬영 시각', meta.capturedAt ? String(meta.capturedAt).replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace('Z', ' UTC') : '');
+      pmRow('좌표', meta.gps ? C.formatGps(meta.gps) + (meta.gps.alt != null ? ' · 고도 ' + Math.round(meta.gps.alt) + 'm' : '') : '');
+      pmRow('일련번호', meta.serial);
+      pmRow('소프트웨어', meta.software);
+      pmRow('해상도', meta.width && meta.height ? meta.width + ' × ' + meta.height : '');
+      box.appendChild(pm);
+    }
+
+    if (exif.note) {
+      box.appendChild(el('div', 'clean-note', exif.note));
+    }
+
     if (exif.count) {
       var grid = el('div', 'exif-tags');
       exif.tags.slice(0, 14).forEach(function (t) {
@@ -700,7 +765,8 @@
       box.appendChild(el('div', 'clean-note', '이 파일에는 GPS·촬영기기 정보가 남아 있지 않습니다.'));
     }
 
-    var isImage = exif.format === 'jpeg' || exif.format === 'png' || exif.format === 'webp';
+    var isImage = exif.format === 'jpeg' || exif.format === 'png' || exif.format === 'webp' ||
+      exif.format === 'avif' || exif.format === 'heic';
     if (isImage) {
       var acts = el('div', 'clean-actions');
       var bj = el('button', 'btn btn-sm', 'JPG로 정리해 내려받기');
@@ -715,7 +781,9 @@
       acts.appendChild(bp);
       box.appendChild(acts);
       box.appendChild(el('div', 'clean-note',
-        '사진을 캔버스에 다시 그려 저장합니다. EXIF·GPS·썸네일·제조사 정보가 모두 빠지고, 화면에 보이던 방향 그대로 저장됩니다.'));
+        exif.format === 'heic'
+          ? '사진을 캔버스에 다시 그려 저장합니다. EXIF·GPS·썸네일이 모두 빠집니다. 이 브라우저가 HEIC를 열지 못하면 저장이 되지 않으니, 그때는 아이폰 사진 앱에서 JPG로 내보낸 뒤 다시 확인하세요.'
+          : '사진을 캔버스에 다시 그려 저장합니다. EXIF·GPS·썸네일·제조사 정보가 모두 빠지고, 화면에 보이던 방향 그대로 저장됩니다.'));
     } else {
       box.appendChild(el('div', 'clean-note', '이 형식은 여기서 메타데이터를 제거할 수 없습니다.'));
     }
@@ -841,6 +909,22 @@
   window.addEventListener('dragover', function (e) { e.preventDefault(); });
   window.addEventListener('drop', function (e) { e.preventDefault(); });
 
+  async function loadSampleHeic(btn) {
+    if (btn) btn.disabled = true;
+    try {
+      var resp = await fetch('sample-photo.heic');
+      if (!resp.ok) throw new Error('샘플 파일을 찾지 못했습니다.');
+      var blob = await resp.blob();
+      var file = new File([blob], 'IMG_0001.heic', { type: 'image/heic' });
+      await addFiles([file]);
+      fileList.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      toast('샘플을 불러오지 못했습니다: ' + (err.message || err), 'warn');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function loadSamplePhoto(btn) {
     if (btn) btn.disabled = true;
     try {
@@ -879,6 +963,58 @@
     ['lower', '소문자'], ['upper', '대문자'], ['digit', '숫자'], ['symbol', '기호'], ['hangul', '한글']
   ];
 
+  function formatGuesses(n) {
+    if (!isFinite(n) || n <= 0) return '—';
+    if (n < 10000) return Math.round(n).toLocaleString('ko-KR') + '회';
+    var exp = Math.floor(Math.log10(n));
+    var mant = n / Math.pow(10, exp);
+    return '약 ' + (mant >= 9.95 ? 1 : Math.round(mant * 10) / 10) + '×10^' + (mant >= 9.95 ? exp + 1 : exp) + '회';
+  }
+
+  function renderPasswordZx(value, res) {
+    var box = $('#pwZx');
+    if (!box) return;
+    var zx = res.zxcvbn;
+    if (!value || !zx) { box.hidden = true; return; }
+    box.hidden = false;
+
+    var scoreEl = $('#pwZxScore');
+    scoreEl.textContent = '추측 저항 ' + (zx.score + 1) + '/5';
+    scoreEl.setAttribute('data-score', String(zx.score));
+
+    var guesses = $('#pwZxGuesses');
+    guesses.textContent = '';
+    var rows = [
+      ['추측에 필요한 횟수', formatGuesses(zx.guesses)],
+      ['온라인 시도 (초당 10회)', res.crackText.online],
+      ['해시 유출 · 느린 해시 (초당 1만 회)', res.crackText.offlineSlow || res.crackText.offline],
+      ['해시 유출 · 빠른 해시 (초당 100억 회)', res.crackText.offline]
+    ];
+    rows.forEach(function (r) {
+      var row = el('div', 'zx-row');
+      row.appendChild(el('span', null, r[0]));
+      row.appendChild(el('b', null, r[1]));
+      guesses.appendChild(row);
+    });
+    if (zx.matchCount) {
+      var dict = zx.matches.filter(function (m) { return m.dictionary; });
+      var row = el('div', 'zx-row');
+      row.appendChild(el('span', null, '사전·패턴에 걸린 조각'));
+      row.appendChild(el('b', null, zx.matchCount + '개' + (dict.length ? ' · 사전 ' + dict.length + '개' : '')));
+      guesses.appendChild(row);
+    }
+
+    var tips = $('#pwZxTips');
+    tips.textContent = '';
+    var feedback = zx.feedback || {};
+    if (feedback.warning) tips.appendChild(el('li', 'zx-warn', feedback.warning));
+    (feedback.suggestions || []).forEach(function (tip) { tips.appendChild(el('li', null, tip)); });
+    if (!tips.children.length) tips.appendChild(el('li', 'zx-good', '사전 단어·키보드 배열·날짜 패턴이 발견되지 않았습니다.'));
+
+    var src = $('#pwZxSource');
+    if (src) src.textContent = '패턴 인식 엔진: zxcvbn (MIT) · 브라우저 안에서만 계산';
+  }
+
   function renderPassword() {
     var value = pwInput.value;
     var res = C.analyzePassword(value);
@@ -905,6 +1041,8 @@
       var chip = el('span', 'class-chip' + (res.classes[pair[0]] ? ' is-on' : ''), pair[1]);
       pwClasses.appendChild(chip);
     });
+
+    renderPasswordZx(value, res);
 
     pwSummary.textContent = '';
     if (value) {
@@ -946,7 +1084,10 @@
     if (node) node.addEventListener('change', generate);
   });
 
-  pwInput.addEventListener('input', renderPassword);
+  pwInput.addEventListener('input', function () {
+    renderPassword();
+    if (pwInput.value && !C.engineState().password) loadPasswordEngine();
+  });
 
   /* ══════════════════════════════════════════════════
      전역 액션
@@ -991,6 +1132,7 @@
         renderUrlSummary();
         break;
       case 'load-sample-photo': loadSamplePhoto(trigger); break;
+      case 'load-sample-heic': loadSampleHeic(trigger); break;
       case 'generate': generate(); break;
       case 'gen-copy':
         if (!genOut.textContent || genOut.textContent === '—') { generate(); }

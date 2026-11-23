@@ -4,7 +4,8 @@
 서버·빌드·외부 트래커 없이 정적 파일만으로 동작하며, 입력한 내용은 **어디로도 전송되지 않고 저장되지도 않습니다**.
 
 - 미리보기: `preview-desktop.png` (1440×900), `preview-mobile.png` (390×844), `preview-url.png`, `preview-file.png`, `preview-password.png`, `preview-dark.png`, `preview-mobile-url.png`
-- 테스트 샘플: `sample-photo.jpg` — **가상으로 만든 이미지**에 GPS(37.5665, 126.9780)·기기명을 일부러 넣은 파일. 실제 촬영 사진이 아닙니다.
+- 테스트 샘플: `sample-photo.jpg` · `sample-photo.heic` · `sample-photo.avif` — **가상으로 만든 이미지**에 GPS(37.5665, 126.9780)·기기명을 일부러 넣은 파일. 실제 촬영 사진이 아닙니다.
+- 표준 엔진: `assets/vendor/`에 zxcvbn 4.4.2(MIT) · exifr 7.1.3(MIT) · tldts 7.5.5(MIT)를 **로컬 벤더링**했습니다(외부 CDN 0건). 라이선스 고지는 같은 폴더의 `LICENSE-*.txt`.
 
 ---
 
@@ -27,8 +28,8 @@ python3 -m http.server 8080
 |---|---|
 | **개인정보 마스킹** | 붙여넣은 글에서 주민등록번호·카드·계좌·사업자번호·휴대폰·전화·이메일·IP를 실시간 탐지 → 종류별 배지·하이라이트 → **안전 마스킹 적용** 후 원클릭 복사 |
 | **링크 진단** | URL 위험 점수 0~100 + 근거별 감점. 브랜드 사칭 유사 도메인, 퓨니코드/호모그래프, IP 직접 접속, `@` 우회, 단축 URL, 비-HTTPS, 위험 확장자, 긴급 유도 키워드 |
-| **파일 점검** | SHA-256·SHA-1 실시간 계산, 매직 바이트 대조(위장 확장자), 이중 확장자·RTL 문자, 사진 EXIF(GPS·기기·촬영시각) 파싱, **메타데이터 0개 클린 이미지 다운로드** |
-| **비밀번호** | 실효 엔트로피·크래킹 예상 시간·패턴 경고, `crypto.getRandomValues` 기반 생성기(길이·문자 종류·헷갈리는 글자 제외) |
+| **파일 점검** | SHA-256·SHA-1 실시간 계산, 매직 바이트 대조(위장 확장자), 이중 확장자·RTL 문자, 사진 EXIF(GPS·기기·촬영시각) 파싱 — **HEIC·HEIF·AVIF(아이폰 기본)** 포함, **메타데이터 0개 클린 이미지 다운로드** |
+| **비밀번호** | 실효 엔트로피 + **사전·패턴 기반 추측 횟수(zxcvbn)**·크래킹 예상 시간·패턴 경고, `crypto.getRandomValues` 기반 생성기(길이·문자 종류·헷갈리는 글자 제외) |
 
 ---
 
@@ -68,14 +69,19 @@ python3 -m http.server 8080
 | 긴급·계정·결제 유도 키워드 | 최대 +24 |
 | 서브도메인 과다 · 이상 포트 · 하이픈 과다 · 위험 TLD | +6~12 |
 
+| 공용 접미사 아래 임대 주소(`github.io`, `blogspot.com` …) | +8 |
+
 점수 구간: **0~19 안전 / 20~39 주의 / 40~64 위험 / 65~100 매우 위험**.
+등록 도메인(eTLD+1)은 **공인 접미사 목록(tldts, ICANN + 민간 접미사)** 으로 계산합니다. 그래서 `a.b.co.kr`은 `b.co.kr`, `x.github.io`는 `x.github.io`로 갈라지고, `co.kr` 같은 접미사 자체를 브랜드처럼 위장한 주소를 정확히 잡습니다. 엔진이 없을 때는 내장 접미사 목록으로 같은 규칙을 적용합니다.
 공식 도메인(`naver.com`, `coupang.com` 등)은 사칭 규칙을 적용하지 않고 안전 신호로 표시합니다. 순수 한글 IDN은 호모그래프로 보지 않습니다.
 
 ### 파일
 
 - **매직 바이트**: JPEG·PNG·GIF·WebP·PDF·ZIP·RAR·7z·MZ(exe)·ELF·Mach-O·OLE2(doc/xls)·HWP·MP3·MP4·WAV·AVI·TIFF·BMP·ICO·RTF·GZIP·TAR·ISO + 텍스트/알 수 없음.
 - 확장자 기대값과 실제 형식이 다르면 **위장 파일(danger)**. `.pdf.exe`, RTL override(U+202E), 끝점·공백도 별도 경고.
-- **EXIF**: JPEG APP1, PNG `eXIf`/`tEXt`, WebP `EXIF` 청크를 읽어 IFD0·Exif IFD·GPS IFD를 순회합니다. GPS는 도/분/초 유리수를 십진수로 변환해 표시합니다.
+- **EXIF**: JPEG APP1, PNG `eXIf`/`tEXt`, WebP `EXIF` 청크, TIFF, **HEIC/HEIF·AVIF(ISO-BMFF)** 의 `meta`→`iinf`/`iloc` Exif 아이템을 읽어 IFD0·Exif IFD·GPS IFD를 순회합니다. GPS는 도/분/초 유리수를 십진수로 변환해 표시합니다.
+  - HEIC·AVIF는 `iloc` 버전 0·1·2, `base_offset`+`extent_offset`, 4바이트 TIFF 헤더 오프셋 규약을 모두 해석합니다(브랜드 `mif1` 파일 포함).
+  - exifr가 준비되면 같은 TIFF 블록을 표준 태그 이름·날짜·GPS 객체로 다시 읽어 **정밀 촬영 정보**(기기·렌즈·일련번호·촬영 시각·고도)를 보여 줍니다. 엔진이 없으면 내장 태그 표로만 표시합니다.
 - **클린 이미지**: `<img>` → `<canvas>` → `toBlob`. EXIF·GPS·썸네일·제조사 정보가 모두 사라지고, 화면에 보이던 방향 그대로 저장됩니다. 정리 후 다시 검사해 `12개 → 0개`와 새 SHA-256을 보여 줍니다.
 
 ### 비밀번호
@@ -87,13 +93,25 @@ python3 -m http.server 8080
 ```
 
 등급: 28비트 미만 매우 약함 / 40 미만 약함 / 58 미만 보통 / 76 미만 강함 / 그 이상 매우 강함.
+
+**사전·패턴 기반 진단(zxcvbn)** 이 준비되면(=비밀번호 탭을 열면 **지연 로딩**, 822KB) 등급과 크래킹 시간을 추측 횟수 기준으로 다시 매깁니다.
+`password`는 추측 3회(상위 10개 비밀번호), `vH7#qLm2!Rt9@Wz4&Kp1`은 10^20회 수준입니다. 화면에는 네 시나리오를 함께 보여 줍니다.
+
+| 시나리오 | 기준 |
+|---|---|
+| 온라인 시도 | 초당 10회 |
+| 해시 유출 · 느린 해시(bcrypt 등) | 초당 1만 회 |
+| 해시 유출 · 빠른 해시(MD5 등) | 초당 100억 회 |
+
+사전·키보드 배열·날짜·반복에 걸린 조각 수와 한국어 피드백(영문 원문은 데이터에 보존)도 함께 표시합니다.
 생성기는 `crypto.getRandomValues` + 거부 샘플링(모듈로 편향 제거)으로 뽑고, 선택한 글자 종류가 최소 하나씩 들어가도록 보정한 뒤 Fisher–Yates로 섞습니다.
 
 ---
 
 ## 프라이버시
 
-- `fetch`는 같은 폴더의 `sample-photo.jpg` 한 번뿐입니다. 분석·전송 API 호출, 외부 폰트·CDN·트래커 0건.
+- `fetch`는 같은 폴더의 `sample-photo.jpg`·`sample-photo.heic` 두 샘플뿐입니다. 분석·전송 API 호출, 외부 폰트·CDN·트래커 0건.
+- 벤더 엔진(tldts·exifr·zxcvbn)도 같은 폴더의 정적 파일입니다. 비밀번호 엔진은 탭을 열 때 한 번만 받습니다.
 - 입력한 글·파일·비밀번호는 메모리에만 있고 `localStorage`에 쓰지 않습니다. 저장하는 것은 테마 설정 하나(`guard.theme.v1`)입니다.
 - DOM 삽입은 전부 `textContent`/`createElement`. 붙여넣은 HTML·`<script>`는 글자로만 표시됩니다(테스트로 확인).
 
@@ -135,17 +153,17 @@ python3 -m http.server 8080
 # 1) 로직 단위 테스트 (Playwright에 번들된 node 사용)
 /workspace/.local/lib/python3.12/site-packages/playwright/driver/node test.js
 #    (다른 node가 있으면 `node test.js` 도 동일하게 동작합니다)
-#   → PASS 201 · FAIL 0
+#   → PASS 282 · FAIL 0
 
 # 2) 실제 브라우저 검증 (Chrome, 1440×900 · 390×844)
 python3 uitest.py
-#   → PASS 198 · FAIL 0
+#   → PASS 221 · FAIL 0
 ```
 
 `uitest.py`가 확인하는 것: 콘솔 에러 0, 404/5xx 0, 외부 요청 0, 가로 넘침 0(데스크톱·모바일 전 탭),
 **A안 토큰 실측(바탕·카드·보더·라운드·헤드라인 800·코발트 단일 액센트)과 본문/푸터 링크 대비 4.5:1**,
 개인정보 8건 탐지·마스킹·클립보드 복사·재검사 0건, XSS 미실행, 링크 점수/근거/게이지,
-**Python `hashlib`와 대조한 실제 SHA-256**, EXIF GPS 파싱, **정리본 다운로드 바이트를 PIL로 열어 EXIF·GPS 부재와 원본 크기 유지 확인**,
+**Python `hashlib`와 대조한 실제 SHA-256**, EXIF GPS 파싱, **HEIC 샘플의 GPS·exifr 정밀 정보**, **정리본 다운로드 바이트를 PIL로 열어 EXIF·GPS 부재와 원본 크기 유지 확인**,
 위장 파일·이중 확장자 판정, 비밀번호 진단·생성·복사, 다크 모드(대비 포함), 모달.
 
 ## 파일
@@ -157,9 +175,10 @@ python3 uitest.py
 | `core.js` | 탐지·마스킹·URL 점수·해시·매직바이트·EXIF·비밀번호 (DOM/네트워크 없음) |
 | `data.js` | 예시 글·예시 링크 (전부 가상 데이터) |
 | `app.js` | 화면 조립·이벤트 |
-| `test.js` | 단위·정적·토큰 테스트 201개 |
-| `uitest.py` | 브라우저 검증 198개 + 스크린샷 |
-| `sample-photo.jpg` | GPS·기기정보를 넣은 가상 샘플 사진 |
+| `test.js` | 단위·정적·토큰 테스트 282개 (엔진 유무 양쪽 경로) |
+| `uitest.py` | 브라우저 검증 221개 + 스크린샷 |
+| `assets/vendor/` | tldts·exifr·zxcvbn 로컬 번들 + 라이선스 고지 |
+| `sample-photo.jpg` · `.heic` · `.avif` | GPS·기기정보를 넣은 가상 샘플 사진 3형식 |
 
 ## 배포
 
