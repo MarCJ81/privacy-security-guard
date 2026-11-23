@@ -12,6 +12,40 @@
   'use strict';
 
   /* ──────────────────────────────────────────────────────────
+     0. 표준 엔진 (로컬 벤더 오픈소스)
+     zxcvbn(비밀번호) · exifr(사진 메타데이터) · tldts(공인 접미사)를
+     페이지가 함께 불러오면 자동으로 사용하고, 없으면 자체 구현으로
+     그대로 동작한다. 어느 엔진을 쓰는지 결과에 항상 남긴다.
+     ────────────────────────────────────────────────────────── */
+
+  var ENGINES = { password: null, photo: null, domain: null };
+
+  function setEngine(name, impl) {
+    if (!name) return null;
+    if (impl) ENGINES[name] = impl;
+    return ENGINES[name] || null;
+  }
+
+  function setEngines(map) {
+    if (!map) return;
+    Object.keys(map).forEach(function (k) { setEngine(k, map[k]); });
+  }
+
+  function engine(name) {
+    if (ENGINES[name]) return ENGINES[name];
+    var g = (typeof globalThis !== 'undefined') ? globalThis : null;
+    if (!g) return null;
+    if (name === 'password' && typeof g.zxcvbn === 'function') ENGINES.password = g.zxcvbn;
+    if (name === 'photo' && g.exifr && typeof g.exifr.parse === 'function') ENGINES.photo = g.exifr;
+    if (name === 'domain' && g.tldts && typeof g.tldts.getDomain === 'function') ENGINES.domain = g.tldts;
+    return ENGINES[name] || null;
+  }
+
+  function engineState() {
+    return { password: !!engine('password'), photo: !!engine('photo'), domain: !!engine('domain') };
+  }
+
+  /* ──────────────────────────────────────────────────────────
      1. 개인정보(PII) 탐지 · 마스킹
      ────────────────────────────────────────────────────────── */
 
@@ -391,7 +425,7 @@
     'gov.uk', 'ac.uk', 'com.cn', 'com.au', 'com.br', 'co.in', 'com.tw', 'com.hk', 'com.vn',
     'co.id', 'co.th', 'com.sg', 'com.mx', 'com.tr', 'com.ar', 'com.ua', 'co.za', 'com.es', 'co.nz'];
 
-  function registrableDomain(host) {
+  function builtinRegistrable(host) {
     var labels = String(host || '').toLowerCase().replace(/\.$/, '').split('.').filter(Boolean);
     if (labels.length <= 1) return labels.join('.');
     var two = labels.slice(-2).join('.');
@@ -400,6 +434,46 @@
     }
     return two;
   }
+
+  /* 공인 접미사(eTLD+1) 판정.
+     tldts가 있으면 ICANN·민간 접미사 목록 전체로 계산하고,
+     없으면 위의 내장 목록으로 계산한다. */
+  function parseDomain(host) {
+    var h = String(host || '').toLowerCase().replace(/\.$/, '');
+    var labels = h.split('.').filter(Boolean);
+    var t = engine('domain');
+
+    if (t && typeof t.parse === 'function') {
+      var p = null;
+      try { p = t.parse(h, { allowPrivateDomains: true, validateHostname: false }); } catch (e) { p = null; }
+      if (p && p.domain) {
+        return {
+          registrable: p.domain,
+          publicSuffix: p.publicSuffix || '',
+          isPrivate: !!p.isPrivate,
+          isIp: !!p.isIp,
+          subdomain: p.subdomain || '',
+          listSource: 'tldts'
+        };
+      }
+      if (p && p.isIp) {
+        return { registrable: h, publicSuffix: '', isPrivate: false, isIp: true, subdomain: '', listSource: 'tldts' };
+      }
+    }
+
+    var reg = builtinRegistrable(h);
+    var regLabels = reg.split('.').filter(Boolean);
+    return {
+      registrable: reg,
+      publicSuffix: regLabels.slice(1).join('.'),
+      isPrivate: false,
+      isIp: /^\d{1,3}(\.\d{1,3}){3}$/.test(h),
+      subdomain: labels.slice(0, Math.max(0, labels.length - regLabels.length)).join('.'),
+      listSource: 'built-in'
+    };
+  }
+
+  function registrableDomain(host) { return parseDomain(host).registrable; }
 
   function levenshtein(a, b) {
     a = String(a); b = String(b);
@@ -506,7 +580,8 @@
     }
 
     var host = u.hostname.toLowerCase();
-    var reg = registrableDomain(host);
+    var domainInfo = parseDomain(host);
+    var reg = domainInfo.registrable;
     var labels = host.split('.').filter(Boolean);
     var regLabels = reg.split('.').filter(Boolean);
     var core = regLabels[0] || host;
@@ -525,6 +600,14 @@
     var reasons = [], positives = [];
     function add(id, title, detail, points, severity) {
       reasons.push({ id: id, title: title, detail: detail, points: points, severity: severity || 'warn' });
+    }
+
+    /* ── 0. 공인 접미사 아래 임대 도메인 ── */
+    if (domainInfo.isPrivate) {
+      add('private-suffix', '공용 접미사 아래에 만든 주소',
+        host + ' 는 ' + domainInfo.publicSuffix + ' 아래 누구나 만들 수 있는 주소입니다. ' +
+        '등록 도메인은 ' + reg + ' 이고, 운영 주체는 이 주소만으로 알 수 없습니다.',
+        8, 'info');
     }
 
     /* ── 1. 브랜드 사칭 ── */
@@ -721,6 +804,9 @@
 
     return {
       ok: true, input: raw, url: u.href, host: host, registrable: reg,
+      publicSuffix: domainInfo.publicSuffix, subdomain: domainInfo.subdomain,
+      privateSuffix: domainInfo.isPrivate, isIp: domainInfo.isIp,
+      domainList: domainInfo.listSource,
       readableHost: decodedHost, protocol: u.protocol.replace(':', ''),
       path: u.pathname, query: u.search, port: u.port || '',
       score: score, grade: grade, verdict: verdict, advice: advice,
@@ -797,7 +883,8 @@
 
   var KIND_LABEL = {
     jpeg: 'JPEG 이미지', png: 'PNG 이미지', gif: 'GIF 이미지', webp: 'WebP 이미지',
-    bmp: 'BMP 이미지', tiff: 'TIFF 이미지', pdf: 'PDF 문서', zip: 'ZIP 압축 파일',
+    bmp: 'BMP 이미지', tiff: 'TIFF 이미지', heic: 'HEIC/HEIF 사진', avif: 'AVIF 이미지',
+    pdf: 'PDF 문서', zip: 'ZIP 압축 파일',
     rar: 'RAR 압축 파일', '7z': '7-Zip 압축 파일', exe: '윈도우 실행 파일',
     elf: '리눅스 실행 파일', macho: '맥 실행 파일', ole2: 'MS 오피스 구형 문서',
     hwp: '한글 문서', mp3: 'MP3 오디오', mp4: 'MP4 영상', wav: 'WAV 오디오',
@@ -808,6 +895,7 @@
   var EXT_KINDS = {
     jpg: ['jpeg'], jpeg: ['jpeg'], jpe: ['jpeg'], png: ['png'], gif: ['gif'], bmp: ['bmp'],
     webp: ['webp'], ico: ['ico'], tif: ['tiff'], tiff: ['tiff'], svg: ['text', 'svg'],
+    heic: ['heic'], heif: ['heic'], hif: ['heic'], avif: ['avif'],
     pdf: ['pdf'], zip: ['zip'], docx: ['zip'], xlsx: ['zip'], pptx: ['zip'], hwpx: ['zip'],
     epub: ['zip'], apk: ['zip'], jar: ['zip'], odt: ['zip'], ods: ['zip'],
     doc: ['ole2'], xls: ['ole2'], ppt: ['ole2'], msg: ['ole2'],
@@ -833,9 +921,46 @@
     return out.join(' ');
   }
 
+  /* ISO-BMFF(HEIC·HEIF·AVIF) 브랜드 */
+  var HEIF_BRANDS = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'hevm', 'hevs', 'mif1', 'mif2', 'msf1'];
+  var AVIF_BRANDS = ['avif', 'avis'];
+
+  function asciiAt(bytes, at, len) {
+    var out = '';
+    for (var i = 0; i < len; i++) out += String.fromCharCode(bytes[at + i] || 0);
+    return out;
+  }
+
+  /* ftyp 박스의 메이저 브랜드로 HEIC/AVIF/MP4를 가른다. */
+  function ftypKind(bytes) {
+    if (bytes.length < 12) return null;
+    if (asciiAt(bytes, 4, 4) !== 'ftyp') return null;
+    var major = asciiAt(bytes, 8, 4).toLowerCase();
+    var compatible = [];
+    var boxSize = ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
+    var brandEnd = Math.min(bytes.length, boxSize > 16 && boxSize < 4096 ? boxSize : 32);
+    for (var at = 16; at + 4 <= brandEnd; at += 4) {
+      compatible.push(asciiAt(bytes, at, 4).toLowerCase());
+    }
+    var brands = [major].concat(compatible);
+    if (AVIF_BRANDS.indexOf(major) >= 0) return { kind: 'avif', brands: brands };
+    if (HEIF_BRANDS.indexOf(major) >= 0) return { kind: 'heic', brands: brands };
+    if (brands.some(function (b) { return AVIF_BRANDS.indexOf(b) >= 0; })) return { kind: 'avif', brands: brands };
+    if (brands.some(function (b) { return HEIF_BRANDS.indexOf(b) >= 0; })) return { kind: 'heic', brands: brands };
+    return { kind: 'mp4', brands: brands };
+  }
+
   function sniffMagic(buffer) {
     var bytes = toBytes(buffer);
     if (!bytes.length) return { kind: 'empty', label: '빈 파일', hex: '', matches: [] };
+    /* ISO-BMFF 계열은 ftyp 브랜드로 구분한다(mp4·heic·avif). */
+    var ftyp = ftypKind(bytes);
+    if (ftyp) {
+      if (ftyp.kind === 'heic' || ftyp.kind === 'avif') {
+        return { kind: ftyp.kind, label: KIND_LABEL[ftyp.kind], hex: bytesHex(bytes, 16), matches: [], brands: ftyp.brands };
+      }
+      return { kind: 'mp4', label: 'MP4 영상', hex: bytesHex(bytes, 16), matches: [], brands: ftyp.brands };
+    }
     for (var i = 0; i < MAGIC.length; i++) {
       var sig = MAGIC[i], ok = sig.at + sig.bytes.length <= bytes.length;
       if (!ok) continue;
@@ -881,6 +1006,149 @@
 
   /* ── EXIF ──────────────────────────────────────────────── */
 
+  /* HEIC/HEIF/AVIF(ISO-BMFF) 안의 Exif 아이템 위치를 찾는다.
+     iloc 버전 0·1·2, base_offset·extent_offset, 4바이트 TIFF 오프셋까지
+     직접 확인한다. exifr가 처리하지 못하는 mif1 브랜드 파일도 읽기 위함이다. */
+  function readBoxes(bytes, start, end) {
+    var out = [];
+    var at = start;
+    while (at + 8 <= end) {
+      var size = ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0;
+      var kind = asciiAt(bytes, at + 4, 4);
+      var head = 8;
+      if (size === 1) {
+        if (at + 16 > end) break;
+        var hi = ((bytes[at + 8] << 24) | (bytes[at + 9] << 16) | (bytes[at + 10] << 8) | bytes[at + 11]) >>> 0;
+        size = hi * 4294967296 + (((bytes[at + 12] << 24) | (bytes[at + 13] << 16) | (bytes[at + 14] << 8) | bytes[at + 15]) >>> 0);
+        head = 16;
+      } else if (size === 0) {
+        size = end - at;
+      }
+      if (size < head || at + size > end) break;
+      out.push({ kind: kind, offset: at, size: size, start: at + head, end: at + size });
+      at += size;
+    }
+    return out;
+  }
+
+  function boxAt(list, kind) {
+    if (!list) return null;
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].kind === kind) return list[i];
+    return null;
+  }
+
+  function u16(bytes, at) { return (bytes[at] << 8) | bytes[at + 1]; }
+  function u32(bytes, at) {
+    return ((bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]) >>> 0;
+  }
+
+  function heifExifItem(bytes) {
+    var top = readBoxes(bytes, 0, bytes.length);
+    var meta = boxAt(top, 'meta');
+    if (!meta) return null;
+    var kids = readBoxes(bytes, meta.start + 4, meta.end);   /* meta는 FullBox */
+    var iinf = boxAt(kids, 'iinf');
+    var iloc = boxAt(kids, 'iloc');
+    if (!iinf || !iloc) return null;
+
+    /* iinf → Exif 타입 아이템 ID (FullBox 헤더 4바이트 + entry_count 2바이트 뒤부터) */
+    var iinfKids = readBoxes(bytes, iinf.start + 6, iinf.end);
+    var exifId = null;
+    for (var i = 0; i < iinfKids.length; i++) {
+      var infe = iinfKids[i];
+      if (infe.kind !== 'infe') continue;
+      var version = bytes[infe.start];
+      if (version < 2) continue;
+      var idSize = version === 3 ? 4 : 2;
+      var typeAt = infe.start + 4 + idSize + 2;
+      if (asciiAt(bytes, typeAt, 4) === 'Exif') {
+        exifId = idSize === 4 ? u32(bytes, infe.start + 4) : u16(bytes, infe.start + 4);
+        break;
+      }
+    }
+    if (exifId == null) return null;
+
+    /* iloc → 아이템 위치 */
+    var p = iloc.start;
+    var ver = bytes[p];
+    p += 4;
+    var sizes = bytes[p]; p += 1;
+    var offsetSize = sizes >> 4, lengthSize = sizes & 15;
+    var sizes2 = bytes[p]; p += 1;
+    var baseSize = sizes2 >> 4, indexSize = sizes2 & 15;
+    var idSize2 = ver === 2 ? 4 : 2;
+    var count = u16(bytes, p); p += 2;
+
+    function readN(n) {
+      var v = 0;
+      for (var k = 0; k < n; k++) v = v * 256 + bytes[p + k];
+      p += n;
+      return v;
+    }
+
+    for (var c = 0; c < count; c++) {
+      var id = readN(idSize2);
+      var method = 0;
+      if (ver === 1 || ver === 2) { method = u16(bytes, p) & 15; p += 2; }
+      var dataRef = u16(bytes, p); p += 2;
+      var baseOffset = readN(baseSize);
+      var extents = u16(bytes, p); p += 2;
+      var totalStart = -1, totalLength = 0;
+      for (var e = 0; e < extents; e++) {
+        if (indexSize) p += indexSize;
+        var extentOffset = readN(offsetSize);
+        var extentLength = readN(lengthSize);
+        var abs = baseOffset + extentOffset;
+        if (totalStart < 0) totalStart = abs;
+        totalLength += extentLength;
+      }
+      if (id !== exifId) continue;
+      if (dataRef !== 0 || method !== 0) return null;   /* idat 참조는 지원하지 않음 */
+      if (totalStart < 0 || totalStart >= bytes.length) return null;
+      return { start: totalStart, length: Math.min(totalLength || 0, bytes.length - totalStart), format: 'heif' };
+    }
+    return null;
+  }
+
+  function looksLikeTiff(bytes, at) {
+    if (at + 8 > bytes.length) return false;
+    return (bytes[at] === 0x49 && bytes[at + 1] === 0x49 && bytes[at + 2] === 0x2A && bytes[at + 3] === 0x00) ||
+           (bytes[at] === 0x4D && bytes[at + 1] === 0x4D && bytes[at + 2] === 0x00 && bytes[at + 3] === 0x2A);
+  }
+
+  /* Exif 아이템 안의 TIFF 블록 시작을 찾는다.
+     [4바이트 TIFF 오프셋]["Exif\0\0"][TIFF] 규약과, 아이템 앞에 오프셋 없이
+     TIFF가 바로 오는 파일을 모두 받아들인다. */
+  function exifTiffIn(bytes, start, length) {
+    var end = Math.min(bytes.length, start + (length || (bytes.length - start)));
+    var probe = [];
+    var declared = start + 4 <= end ? u32(bytes, start) : 0;
+    probe.push(start + declared);
+    probe.push(start + 4 + declared);
+    probe.push(start + 4);
+    probe.push(start + 6);
+    probe.push(start);
+    for (var i = 0; i < probe.length; i++) {
+      var at = probe[i];
+      if (at < start || at + 8 > end) continue;
+      if (looksLikeTiff(bytes, at)) return { start: at, end: end };
+      if (bytes[at] === 0x45 && bytes[at + 1] === 0x78 && bytes[at + 2] === 0x69 && bytes[at + 3] === 0x66) {
+        var after = at + 6;
+        if (looksLikeTiff(bytes, after)) return { start: after, end: end };
+      }
+    }
+    return null;
+  }
+
+  function heifTiff(bytes) {
+    var item = heifExifItem(bytes);
+    if (!item) return null;
+    var range = exifTiffIn(bytes, item.start, item.length);
+    if (!range) return null;
+    return { tiffBase: range.start, tiffEnd: range.end };
+  }
+
+
   var EXIF_TAGS = {
     0x010E: '이미지 설명', 0x010F: '제조사(Make)', 0x0110: '기종(Model)', 0x0112: '방향(Orientation)',
     0x011A: '가로 해상도', 0x011B: '세로 해상도', 0x0128: '해상도 단위', 0x0131: '소프트웨어',
@@ -898,8 +1166,9 @@
     0x001D: '촬영 날짜'
   };
 
-  function parseTiff(bytes, base) {
+  function parseTiff(bytes, base, limit) {
     var tags = [], gps = null;
+    var bound = (limit && limit > base) ? Math.min(limit, bytes.length) : bytes.length;
     var le = bytes[base] === 0x49;
     function u16(o) { return le ? bytes[o] | (bytes[o + 1] << 8) : (bytes[o] << 8) | bytes[o + 1]; }
     function u32(o) {
@@ -913,7 +1182,7 @@
     function readValue(type, count, off) {
       var size = typeSize(type) * count;
       var at = size <= 4 ? off : base + u32(off);
-      if (at < 0 || at + size > bytes.length) return null;
+      if (at < 0 || at + size > bound) return null;
       if (type === 2) {
         var s = '';
         for (var i = 0; i < count; i++) {
@@ -950,12 +1219,12 @@
       return null;
     }
     function readIFD(offset, group, tagNames, pointers) {
-      if (offset <= 0 || base + offset + 2 > bytes.length) return;
+      if (offset <= 0 || base + offset + 2 > bound) return;
       var count = u16(base + offset);
       if (count > 512) return;
       for (var i = 0; i < count; i++) {
         var e = base + offset + 2 + i * 12;
-        if (e + 12 > bytes.length) break;
+        if (e + 12 > bound) break;
         var tag = u16(e), type = u16(e + 2), cnt = u32(e + 4);
         if (pointers && (tag === 0x8769 || tag === 0x8825)) {
           pointers[tag] = type === 4 || type === 9 ? readValue(4, 1, e + 8) : u32(e + 8);
@@ -1056,19 +1325,123 @@
       }
     }
 
+    var tiffEnd = bytes.length;
+
+    if (tiffBase < 0) {
+      var ftyp = ftypKind(bytes);
+      if (ftyp && (ftyp.kind === 'heic' || ftyp.kind === 'avif')) {
+        format = ftyp.kind;
+        var found = heifTiff(bytes);
+        if (found) { tiffBase = found.tiffBase; tiffEnd = found.tiffEnd; }
+        else {
+          return {
+            format: format, hasExif: false, count: extra.length, tags: extra, gps: null,
+            note: '이 파일에는 Exif 아이템이 없습니다(촬영 정보가 지워졌거나 원래 없음).'
+          };
+        }
+      }
+    }
+
     if (tiffBase < 0) {
       return { format: format || 'other', hasExif: false, count: extra.length, tags: extra, gps: null };
     }
 
     var parsed;
-    try { parsed = parseTiff(bytes, tiffBase); }
+    try { parsed = parseTiff(bytes, tiffBase, tiffEnd); }
     catch (e) { return { format: format, hasExif: false, count: extra.length, tags: extra, gps: null, error: '메타데이터를 읽지 못했습니다.' }; }
 
     var tags = parsed.tags.concat(extra);
     return {
       format: format, hasExif: parsed.tags.length > 0, count: tags.length,
-      tags: tags, gps: parsed.gps
+      tags: tags, gps: parsed.gps,
+      tiff: { start: tiffBase, end: tiffEnd }
     };
+  }
+
+  /* exifr로 표준 태그 이름·날짜·GPS를 정규화해 읽는다.
+     우리 파서가 찾은 TIFF 블록만 넘기므로 컨테이너 형식(HEIC·AVIF·JPEG·PNG·WebP)과
+     무관하게 같은 결과를 얻는다. */
+  async function parsePhotoMeta(buffer, exif) {
+    var info = exif || parseExif(buffer);
+    var out = {
+      engine: 'builtin',
+      format: info ? info.format : 'other',
+      gps: info && info.gps ? { lat: info.gps.lat, lng: info.gps.lng, alt: null } : null,
+      device: '', lens: '', serial: '', capturedAt: null, software: '',
+      width: null, height: null, orientation: null, gpsTime: null, iso: null,
+      aperture: null, exposure: null, focalLength: null, tagCount: info ? info.count : 0
+    };
+    if (!info) return out;
+
+    /* 엔진이 없어도 우리 태그 표에서 핵심값은 채운다. */
+    (info.tags || []).forEach(function (t) {
+      if (t.tag === 0x010F && !out.make) out.make = String(t.value);
+      if (t.tag === 0x0110 && !out.model) out.model = String(t.value);
+      if (t.tag === 0x0131 && !out.software) out.software = String(t.value);
+    });
+
+    var eng = engine('photo');
+    var tiff = info.tiff;
+    if (!eng || !tiff) return out;
+
+    var view;
+    try { view = toBytes(buffer).subarray(tiff.start, tiff.end); }
+    catch (e) { return out; }
+
+    var parsed = null;
+    try {
+      parsed = await eng.parse(view, {
+        tiff: true, ifd0: true, exif: true, gps: true, interop: false,
+        makerNote: false, userComment: false, xmp: false, icc: false, iptc: false,
+        jfif: false, ihdr: false, translateKeys: true, translateValues: true,
+        reviveValues: true, sanitize: true, mergeOutput: true
+      });
+    } catch (e) { parsed = null; }
+
+    if (!parsed) {
+      out.engine = 'builtin';
+      return out;
+    }
+
+    function pick() {
+      for (var i = 0; i < arguments.length; i++) {
+        var v = parsed[arguments[i]];
+        if (v !== undefined && v !== null && v !== '') return v;
+      }
+      return null;
+    }
+    function clean(v) { return v == null ? '' : String(v).trim(); }
+
+    var make = clean(pick('Make', 'make'));
+    var model = clean(pick('Model', 'model'));
+    out.engine = 'exifr';
+    out.device = [make, model].filter(Boolean).join(' ');
+    out.make = make;
+    out.model = model;
+    out.lens = clean(pick('LensModel', 'Lens', 'LensInfo'));
+    out.serial = clean(pick('BodySerialNumber', 'CameraSerialNumber', 'SerialNumber'));
+    out.software = clean(pick('Software')) || out.software;
+    out.orientation = pick('Orientation');
+    out.width = pick('ExifImageWidth', 'ImageWidth', 'PixelXDimension');
+    out.height = pick('ExifImageHeight', 'ImageHeight', 'PixelYDimension');
+    out.iso = pick('ISO', 'ISOSpeedRatings');
+    out.aperture = pick('FNumber', 'ApertureValue');
+    out.exposure = pick('ExposureTime');
+    out.focalLength = pick('FocalLength');
+
+    var captured = pick('DateTimeOriginal', 'CreateDate', 'ModifyDate');
+    if (captured instanceof Date && !isNaN(captured.getTime())) out.capturedAt = captured.toISOString();
+    else if (captured) out.capturedAt = String(captured);
+
+    var lat = pick('latitude', 'GPSLatitude');
+    var lng = pick('longitude', 'GPSLongitude');
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      out.gps = { lat: lat, lng: lng, alt: pick('GPSAltitude') };
+    }
+    var gpsDate = pick('GPSDateStamp');
+    if (gpsDate) out.gpsTime = gpsDate instanceof Date ? gpsDate.toISOString() : String(gpsDate);
+
+    return out;
   }
 
   function formatGps(gps) {
@@ -1173,8 +1546,13 @@
     }
 
     var exif = null;
-    if (sniff.kind === 'jpeg' || sniff.kind === 'png' || sniff.kind === 'webp' || sniff.kind === 'tiff') {
+    var metaKinds = ['jpeg', 'png', 'webp', 'tiff', 'heic', 'avif'];
+    if (metaKinds.indexOf(sniff.kind) >= 0) {
       try { exif = parseExif(bytes); } catch (e) { exif = { error: 'EXIF 파싱 실패', count: 0, tags: [] }; }
+      if (exif) {
+        try { exif.meta = await parsePhotoMeta(bytes, exif); }
+        catch (e) { exif.meta = null; }
+      }
     }
 
     return {
@@ -1256,6 +1634,90 @@
     return '10^' + exp + '년 이상';
   }
 
+  var ZX_LEVELS = [
+    { key: 'very-weak', label: '매우 약함' },
+    { key: 'weak', label: '약함' },
+    { key: 'fair', label: '보통' },
+    { key: 'strong', label: '강함' },
+    { key: 'very-strong', label: '매우 강함' }
+  ];
+
+  /* zxcvbn: 사전·키보드 배열·날짜·반복 패턴을 인식해 현실적인 추측 횟수를 낸다. */
+  /* zxcvbn의 영문 피드백을 한국어로 옮긴다(원문은 feedback.raw에 남긴다). */
+  var ZX_WARNINGS_KO = {
+    'Straight rows of keys are easy to guess': '키보드에서 나란한 글자 배열은 쉽게 추측됩니다',
+    'Short keyboard patterns are easy to guess': '짧은 키보드 패턴은 쉽게 추측됩니다',
+    'Repeats like "aaa" are easy to guess': '"aaa"처럼 같은 글자 반복은 쉽게 추측됩니다',
+    'Repeats like "abcabcabc" are only slightly harder to guess than "abc"': '"abcabcabc"처럼 덩어리 반복은 "abc"보다 조금 어려울 뿐입니다',
+    'Sequences like abc or 6543 are easy to guess': 'abc·6543 같은 연속 배열은 쉽게 추측됩니다',
+    'Recent years are easy to guess': '최근 연도는 쉽게 추측됩니다',
+    'Dates are often easy to guess': '날짜는 대개 쉽게 추측됩니다',
+    'This is a top-10 common password': '가장 많이 쓰이는 상위 10개 비밀번호입니다',
+    'This is a top-100 common password': '가장 많이 쓰이는 상위 100개 비밀번호입니다',
+    'This is a very common password': '아주 흔한 비밀번호입니다',
+    'This is similar to a commonly used password': '널리 쓰이는 비밀번호와 비슷합니다',
+    'A word by itself is easy to guess': '낱말 하나만으로는 쉽게 추측됩니다',
+    'Names and surnames by themselves are easy to guess': '이름·성을 그대로 쓰면 쉽게 추측됩니다',
+    'Common names and surnames are easy to guess': '흔한 이름 조합은 쉽게 추측됩니다'
+  };
+  var ZX_SUGGESTIONS_KO = {
+    'Use a few words, avoid common phrases': '몇 개의 낱말을 붙이되 흔한 문구는 피하세요',
+    'No need for symbols, digits, or uppercase letters': '기호·숫자·대문자를 억지로 넣지 않아도 됩니다',
+    'Add another word or two. Uncommon words are better.': '낱말을 한두 개 더 넣으세요. 드문 낱말이 좋습니다',
+    "Capitalization doesn't help very much": '첫 글자만 대문자로 바꾸는 것은 거의 도움이 되지 않습니다',
+    'All-uppercase is almost as easy to guess as all-lowercase': '전부 대문자로 쓰는 것은 소문자와 비슷하게 쉽습니다',
+    "Reversed words aren't much harder to guess": '낱말을 거꾸로 쓰는 것은 그다지 어렵지 않습니다',
+    "Predictable substitutions like '@' instead of 'a' don't help very much": "'a'를 '@'로 바꾸는 식의 치환은 큰 도움이 되지 않습니다"
+  };
+
+  function zxcvbnResult(value) {
+    var z = engine('password');
+    if (!z || !value) return null;
+    var r = null;
+    try { r = z(value); } catch (e) { return null; }
+    if (!r || typeof r.score !== 'number') return null;
+    var t = r.crack_times_seconds || {};
+    function sec(keys) {
+      for (var i = 0; i < keys.length; i++) {
+        var v = t[keys[i]];
+        if (typeof v === 'number' && isFinite(v)) return v;
+      }
+      return null;
+    }
+    return {
+      score: r.score,
+      guesses: r.guesses,
+      guessesLog10: r.guesses_log10,
+      seconds: {
+        onlineThrottled: sec(['online_throttling_100_per_hour']),
+        online: sec(['online_no_throttling_10_per_second']),
+        offlineSlow: sec(['offline_slow_hashing_1e4_per_second']),
+        offlineFast: sec(['offline_fast_hashing_1e10_per_second'])
+      },
+      feedback: (function () {
+        var raw = (r.feedback && r.feedback.warning) || '';
+        var rawList = (r.feedback && r.feedback.suggestions ? r.feedback.suggestions : []).slice(0, 4);
+        return {
+          warning: ZX_WARNINGS_KO[raw] || raw,
+          warningRaw: raw,
+          suggestions: rawList.map(function (s) { return ZX_SUGGESTIONS_KO[s] || s; }),
+          suggestionsRaw: rawList
+        };
+      })(),
+      matches: (r.sequence || []).map(function (m) {
+        return {
+          pattern: m.pattern,
+          token: m.token,
+          dictionary: m.dictionary_name || '',
+          rank: m.rank || 0,
+          reversed: !!m.reversed,
+          baseGuesses: m.base_guesses || 0
+        };
+      }).slice(0, 12),
+      matchCount: (r.sequence || []).length
+    };
+  }
+
   function analyzePassword(pw) {
     var value = String(pw == null ? '' : pw);
     var chars = Array.from(value);
@@ -1323,13 +1785,51 @@
     var offline = Math.pow(2, Math.max(0, bits - 1)) / 1e10;
     var online = Math.pow(2, Math.max(0, bits - 1)) / 100;
 
-    return {
+    var result = {
       length: len, classes: c, pool: pool, entropyRaw: rawBits, entropy: bits,
-      score: score, level: level,
+      score: score, level: level, engine: 'entropy', zxcvbn: null,
       crack: { online: online, offline: offline },
       crackText: { online: humanDuration(online), offline: humanDuration(offline) },
       warnings: warnings, common: commonHit.length > 0
     };
+
+    /* 표준 엔진이 있으면 사전·패턴 기반 값으로 등급과 시간을 다시 매긴다. */
+    var z = zxcvbnResult(value);
+    if (z && len > 0) {
+      var bitsFromGuesses = z.guessesLog10 ? z.guessesLog10 * Math.log2(10) : bits;
+      result.engine = 'zxcvbn';
+      result.zxcvbn = z;
+      result.entropyZxcvbn = Math.round(bitsFromGuesses * 10) / 10;
+      result.score = Math.max(0, Math.min(4, z.score));
+      result.level = ZX_LEVELS[result.score];
+      var fast = z.seconds.offlineFast != null ? z.seconds.offlineFast : offline;
+      var slow = z.seconds.offlineSlow != null ? z.seconds.offlineSlow : offline;
+      var onlineSec = z.seconds.online != null ? z.seconds.online : online;
+      result.crack = { online: onlineSec, offline: fast, offlineSlow: slow };
+      result.crackText = {
+        online: humanDuration(onlineSec),
+        offline: humanDuration(fast),
+        offlineSlow: humanDuration(slow)
+      };
+      if (z.feedback.warning) {
+        result.warnings.push({ id: 'dictionary', label: z.feedback.warning });
+      }
+      if (z.feedback.suggestions && z.feedback.suggestions.length) {
+        result.suggestions = z.feedback.suggestions.slice();
+      }
+      if (z.matches && z.matches.length) {
+        var dicts = z.matches.filter(function (m) { return m.dictionary; });
+        if (dicts.length) {
+          result.warnings.push({
+            id: 'dictionary-match',
+            label: '사전에 있는 단어 ' + dicts.length + '곳: ' +
+              dicts.slice(0, 3).map(function (m) { return m.token; }).join(', ')
+          });
+        }
+      }
+    }
+
+    return result;
   }
 
   function secureRandomInt(n) {
@@ -1423,6 +1923,14 @@
     formatGps: formatGps,
     formatBytes: formatBytes,
     analyzePassword: analyzePassword,
+    zxcvbnResult: zxcvbnResult,
+    setEngine: setEngine,
+    setEngines: setEngines,
+    engineState: engineState,
+    parseDomain: parseDomain,
+    parsePhotoMeta: parsePhotoMeta,
+    heifExifItem: heifExifItem,
+    ftypKind: ftypKind,
     generatePassword: generatePassword,
     humanDuration: humanDuration,
     secureRandomInt: secureRandomInt
