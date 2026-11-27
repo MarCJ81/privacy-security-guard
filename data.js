@@ -32,6 +32,34 @@
     '확인 후 회신 주세요. 감사합니다.'
   ].join('\n');
 
+
+  var SAMPLE_TEXT_EN = [
+    '[Enquiry] Hello, this is Hong Gil-dong.',
+    'My mobile is 010-1234-5678 and my office phone is 02-345-6789.',
+    'It is registered under resident number 900101-1234568 and business number 123-45-67891.',
+    'The refund account is 110-123-456789 and the card is 4111-1111-1111-1111.',
+    'Please reply to hong.gildong@example.com.',
+    'The server address is 203.0.113.45 and access logs are kept for three days.'
+  ].join('\n');
+
+  var SAMPLE_TEXT_MIXED_EN = [
+    'Hello! Please check the details below.',
+    '',
+    '· Applicant: Kim Seo-yeon (010-9876-5432)',
+    '· Resident number: 950303-2345678 (with a typo — checksum mismatch example)',
+    '· Deposit account: KB Kookmin Bank 123456-01-234567',
+    '· Card: 5555 5555 5555 4444',
+    '· Email: seoyeon.kim@example.org / alt kim.sy@example.net',
+    '· IP: 198.51.100.7, 2001:db8:85a3::8a2e:370:7334',
+    '',
+    'Please reply once you have checked. Thank you.'
+  ].join('\n');
+
+  function isEn() {
+    var w = typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null);
+    return !!(w && w.ONETAP_I18N && w.ONETAP_I18N.lang && w.ONETAP_I18N.lang() === 'en');
+  }
+
   var SAMPLE_URLS = [
     {
       label: '네이버 사칭',
@@ -80,8 +108,8 @@
   };
 
   return {
-    SAMPLE_TEXT: SAMPLE_TEXT,
-    SAMPLE_TEXT_MIXED: SAMPLE_TEXT_MIXED,
+    get SAMPLE_TEXT() { return isEn() ? SAMPLE_TEXT_EN : SAMPLE_TEXT; },
+    get SAMPLE_TEXT_MIXED() { return isEn() ? SAMPLE_TEXT_MIXED_EN : SAMPLE_TEXT_MIXED; },
     SAMPLE_URLS: SAMPLE_URLS,
     URL_TIPS: URL_TIPS,
     PII_NOTES: PII_NOTES
